@@ -19,17 +19,20 @@ def get_current_path():
     now = datetime.now(timezone.utc)
     return now.strftime("%Y/%m/%d/%H")
 
-def setup_google_auth():
-    """Setup Google Cloud Auth using secret from AWS Secrets Manager"""
+def get_storage_client():
+    """Create a Google Cloud Storage client using credentials from AWS Secrets Manager"""
     try:
-        credentials_dict = json.loads(
-            boto3.client('secretsmanager').get_secret_value(
-                SecretId=os.environ['GOOGLE_CREDS_SECRET_NAME']
-            )['SecretString']
+        # Get credentials from AWS Secrets Manager
+        secret_client = boto3.client('secretsmanager')
+        secret_response = secret_client.get_secret_value(
+            SecretId=os.environ['GOOGLE_CREDS_SECRET_NAME']
         )
-        return storage.Credentials.from_service_account_info(credentials_dict)
+        credentials_dict = json.loads(secret_response['SecretString'])
+        
+        # Create storage client directly from service account info
+        return storage.Client.from_service_account_info(credentials_dict)
     except Exception as e:
-        print(f"Error setting up Google auth: {str(e)}")
+        print(f"Error setting up Google Storage client: {str(e)}")
         raise
 
 def validate_csv_content(csv_content: str) -> Dict[str, Any]:
@@ -239,7 +242,9 @@ def lambda_handler(event, context):
         # Initialize clients
         s3_client = boto3.client('s3')
         cloudwatch = boto3.client('cloudwatch')
-        storage_client = storage.Client(credentials=setup_google_auth())
+        
+        # Get Google Storage client
+        storage_client = get_storage_client()
         
         # Get current folder path
         folder_path = get_current_path()
