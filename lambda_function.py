@@ -15,9 +15,9 @@ def get_current_path():
     now = datetime.now(timezone.utc)
     return now.strftime("%Y/%m/%d/%H")
 
-def get_previous_hour_path():
-    """Get previous hour UTC time folder path: yyyy/MM/DD/HH"""
-    now = datetime.now(timezone.utc) - timedelta(hours=1)
+def get_hour_path(hours_ago):
+    """Get UTC time folder path for X hours ago: yyyy/MM/DD/HH"""
+    now = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
     return now.strftime("%Y/%m/%d/%H")
 
 def get_storage_client():
@@ -171,28 +171,26 @@ def lambda_handler(event, context):
         print("Initializing connection to Google Cloud Storage")
         storage_client = get_storage_client()
         
-        # Get current and previous hour folder paths to ensure we capture all recent files
-        current_folder_path = get_current_path()
-        previous_folder_path = get_previous_hour_path()
+        # Get folder paths for the last 4 hours to ensure we capture all recent files
+        folder_paths = []
+        for i in range(4):
+            folder_paths.append(get_hour_path(i))
         
-        print(f"Checking for files in current hour: {current_folder_path}")
-        print(f"Checking for files in previous hour: {previous_folder_path}")
+        print(f"Checking for files in the last 4 hours: {folder_paths}")
         
-        # Get all files from both current and previous hour
+        # Get all files from the last 4 hours
         gcs_bucket = storage_client.bucket(os.environ['GCS_BUCKET_NAME'])
         
-        # List blobs from current hour
-        current_blobs = list(gcs_bucket.list_blobs(prefix=current_folder_path))
-        current_zip_blobs = [blob for blob in current_blobs if blob.name.endswith('.zip')]
+        # List blobs from each hour and combine
+        all_blobs = []
+        for folder_path in folder_paths:
+            print(f"Listing files in folder: {folder_path}")
+            hour_blobs = list(gcs_bucket.list_blobs(prefix=folder_path))
+            hour_zip_blobs = [blob for blob in hour_blobs if blob.name.endswith('.zip')]
+            print(f"Found {len(hour_zip_blobs)} zip files in {folder_path}")
+            all_blobs.extend(hour_zip_blobs)
         
-        # List blobs from previous hour
-        previous_blobs = list(gcs_bucket.list_blobs(prefix=previous_folder_path))
-        previous_zip_blobs = [blob for blob in previous_blobs if blob.name.endswith('.zip')]
-        
-        # Combine both lists
-        all_blobs = current_zip_blobs + previous_zip_blobs
-        
-        print(f"Found {len(all_blobs)} files to process ({len(current_zip_blobs)} from current hour, {len(previous_zip_blobs)} from previous hour)")
+        print(f"Found {len(all_blobs)} files to process from the last 4 hours")
         
         if not all_blobs:
             print("No files found to process")
@@ -208,8 +206,7 @@ def lambda_handler(event, context):
                 'statusCode': 200,
                 'body': json.dumps({
                     'message': 'No files to process',
-                    'current_hour': current_folder_path,
-                    'previous_hour': previous_folder_path
+                    'checked_folders': folder_paths
                 })
             }
         
@@ -243,8 +240,7 @@ def lambda_handler(event, context):
                 'total_files': len(all_blobs),
                 'transferred_files': successful_files,
                 'failed_transfers': len(all_blobs) - successful_files,
-                'current_hour': current_folder_path,
-                'previous_hour': previous_folder_path,
+                'checked_folders': folder_paths,
                 'total_size': total_size,
                 'duration_seconds': batch_duration
             })
